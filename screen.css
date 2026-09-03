@@ -56,3 +56,17 @@ html, body, #map {
 .marker-cluster-selected {
   border: 3px solid #16b378;
 }
+
+/* Dauerhaft sichtbares Label des Overlay-Bereichs (statt Popup) */
+.overlay-label {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid #e63946;
+  color: #e63946;
+  font-weight: bold;
+  padding: 1px 6px;
+  border-radius: 3px;
+  box-shadow: none;
+}
+.overlay-label::before {
+  border: none; /* Standard-Tooltip-Pfeil von Leaflet entfernen */
+}

@@ -28,23 +28,34 @@ let lastRecord;
 let lastRecords;
 
 // --- Zusätzlicher Overlay-Layer (z.B. Bereich mehrerer Wohnbloecke) ---
-// Wird aus der Datei "overlay.geojson" geladen (liegt neben page.js).
-// Um die Zeichnung zu aendern, einfach diese Datei ersetzen - kein Code-Update noetig.
+// Die URL zur GeoJSON-Datei wird ueber die Widget-Einstellungen (Zahnrad-Icon) konfiguriert.
+// Default: Datei "overlay.geojson" im selben Ordner wie index.html.
+let overlayUrl = 'overlay.geojson';
 let overlayData = null;
 let overlayLayer = null;
+// Merkt sich, welche URL zuletzt geladen wurde, um doppelte/unnoetige fetch-Aufrufe zu vermeiden.
+let loadedOverlayUrl = null;
 
-fetch('https://col4711.github.io/grist-map-overlay/overlay.geojson')
-  .then((r) => { if (!r.ok) throw new Error('overlay.geojson not found'); return r.json(); })
-  .then((geojson) => {
-    overlayData = geojson;
-    // Falls die Karte schon existiert (z.B. Datei laedt langsamer als erste Aktualisierung),
-    // Overlay direkt nachtraeglich einzeichnen.
-    if (amap) { addOverlay(amap); }
-  })
-  .catch((e) => {
-    // Datei ist optional - kein Overlay vorhanden ist kein Fehler.
-    console.warn('Kein Overlay geladen:', e.message);
-  });
+function loadOverlay(url) {
+  if (!url || url === loadedOverlayUrl) { return; }
+  loadedOverlayUrl = url;
+  fetch(url)
+    .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then((geojson) => {
+      overlayData = geojson;
+      if (amap) {
+        // Bereits vorhandenen Overlay-Layer entfernen und neu zeichnen,
+        // ohne die ganze Karte (inkl. Zoom) neu aufzubauen.
+        if (overlayLayer) { amap.removeLayer(overlayLayer); overlayLayer = null; }
+        addOverlay(amap);
+      }
+    })
+    .catch((e) => {
+      // Datei ist optional - kein Overlay vorhanden ist kein Fehler.
+      console.warn('Kein Overlay geladen von', url, ':', e.message);
+      overlayData = null;
+    });
+}
 
 function addOverlay(map) {
   if (!overlayData) { return; }
@@ -63,7 +74,15 @@ function addOverlay(map) {
     }),
     onEachFeature: (feature, layer) => {
       const label = feature.properties && (feature.properties.name || feature.properties.description);
-      if (label) { layer.bindPopup(DOMPurify.sanitize(String(label))); }
+      if (!label) { return; }
+      const isPoint = feature.geometry && feature.geometry.type === 'Point';
+      // "permanent: true" sorgt dafuer, dass die Beschriftung staendig sichtbar ist
+      // (kein Klick/Hover noetig) statt nur als Popup.
+      layer.bindTooltip(DOMPurify.sanitize(String(label)), {
+        permanent: true,
+        direction: isPoint ? 'right' : 'center',
+        className: 'overlay-label',
+      });
     },
   }).addTo(map);
 }
@@ -289,6 +308,9 @@ function updateMap(data) {
   // Grist-Tabellendaten. Wird bei jedem Kartenaufbau neu hinzugefuegt, da die Karte
   // hier komplett neu erstellt wird.
   addOverlay(map);
+  // Falls die Overlay-URL/Daten noch nicht geladen sind (z.B. beim allerersten Aufbau,
+  // bevor grist.onOptions gefeuert hat), jetzt anstossen.
+  loadOverlay(overlayUrl);
 
   const points = []; //L.LatLng[], used for zooming to bounds of all markers
 
@@ -505,7 +527,7 @@ function onEditOptions() {
       updateMode();
     }
   }
-  [ "mapSource", "mapCopyright" ].forEach((opt) => {
+  [ "mapSource", "mapCopyright", "overlayUrl" ].forEach((opt) => {
     const ipt = document.getElementById(opt)
     ipt.onchange = async (e) => {
       await grist.setOption(opt, e.target.value);
@@ -540,4 +562,8 @@ grist.onOptions((options, interaction) => {
   const newCopyright = options?.mapCopyright ?? mapCopyright;
   mapCopyright = newCopyright
   document.getElementById("mapCopyright").value = mapCopyright;
+  const newOverlayUrl = options?.overlayUrl ?? overlayUrl;
+  overlayUrl = newOverlayUrl;
+  document.getElementById("overlayUrl").value = overlayUrl;
+  loadOverlay(overlayUrl);
 });
