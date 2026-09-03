@@ -37,15 +37,30 @@ let overlayLayer = null;
 let loadedOverlayUrl = null;
 
 // Farbe, falls ein Feature in seinen GeoJSON-Properties keine eigene "color" angibt.
-// Beispiel fuer eine individuelle Farbe pro Flaeche in der GeoJSON-Datei:
+// Beispiel fuer eine individuelle Farbe direkt in der GeoJSON-Datei (unterstuetzt, aber
+// z.B. der BayernAtlas-Export schreibt das nicht automatisch mit):
 //   "properties": { "name": "SAN VII", "color": "#2a9d8f" }
+//
+// Alternative, wenn die Quelle (wie BayernAtlas) keine Farbe mitliefert: hier den
+// Bereichsnamen einer Farbe zuordnen. Wird verwendet, falls das Feature selbst keine
+// "color"-Property hat.
+const OVERLAY_COLORS_BY_NAME = {
+  'SAN VI': '#2a9d8f',
+  'SAN VII': '#e63946',
+};
 const DEFAULT_OVERLAY_COLOR = '#e63946';
 
+function overlayColorFor(feature) {
+  if (feature.properties && feature.properties.color) { return feature.properties.color; }
+  const label = feature.properties && (feature.properties.name || feature.properties.description);
+  if (label && OVERLAY_COLORS_BY_NAME[label]) { return OVERLAY_COLORS_BY_NAME[label]; }
+  return DEFAULT_OVERLAY_COLOR;
+}
+
 // Ab dieser Zoomstufe werden die Overlay-Labels eingeblendet.
-// Achtung Leaflet-Konvention: 0 = ganz herausgezoomt (Weltkarte), hoehere Werte = naeher dran
-// (typisch bis ca. 18-20 = Strassenebene). Bei 4 sind die Labels also fast immer sichtbar
-// und blenden nur bei sehr starkem Herauszoomen aus.
-const OVERLAY_LABEL_MIN_ZOOM = 4;
+// Leaflet-Konvention: 0 = ganz herausgezoomt (Weltkarte), hoehere Werte = naeher dran,
+// meist bis Stufe 18-19 (Strassen-/Gebaeudeebene).
+const OVERLAY_LABEL_MIN_ZOOM = 15;
 
 // Alle Layer, die ein permanentes Tooltip-Label tragen - damit wir deren Sichtbarkeit
 // beim Zoomen gemeinsam ein-/ausblenden koennen.
@@ -78,18 +93,26 @@ function addOverlay(map) {
   if (!overlayData) { return; }
   overlayLayer = L.geoJSON(overlayData, {
     style: (feature) => {
-      const color = (feature.properties && feature.properties.color) || DEFAULT_OVERLAY_COLOR;
+      const color = overlayColorFor(feature);
       return { color, weight: 2, fillColor: color, fillOpacity: 0.2 };
     },
     pointToLayer: (feature, latlng) => {
-      const color = (feature.properties && feature.properties.color) || DEFAULT_OVERLAY_COLOR;
+      const color = overlayColorFor(feature);
       return L.circleMarker(latlng, { radius: 6, color, fillColor: color, fillOpacity: 0.8 });
     },
     onEachFeature: (feature, layer) => {
       const label = feature.properties && (feature.properties.name || feature.properties.description);
-      if (!label) { return; }
       const isPoint = feature.geometry && feature.geometry.type === 'Point';
-      const color = (feature.properties && feature.properties.color) || DEFAULT_OVERLAY_COLOR;
+      // Fuer Flaechen (Polygon/Linie): Leaflets eingebautes getCenter() liefert den
+      // geometrischen Flaechenschwerpunkt, der bei verwinkelten/konkaven Formen oft
+      // ausserhalb der sichtbaren Flaeche landet. Wir ersetzen ihn hier durch den
+      // Mittelpunkt der Bounding-Box, der optisch meist zuverlaessiger "in" der Form liegt.
+      if (!isPoint && layer.getBounds) {
+        const boundsCenter = layer.getBounds().getCenter();
+        layer.getCenter = () => boundsCenter;
+      }
+      if (!label) { return; }
+      const color = overlayColorFor(feature);
       // "permanent: true" sorgt dafuer, dass die Beschriftung staendig sichtbar ist
       // (kein Klick/Hover noetig) statt nur als Popup.
       layer.bindTooltip(DOMPurify.sanitize(String(label)), {
