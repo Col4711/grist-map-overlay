@@ -36,6 +36,21 @@ let overlayLayer = null;
 // Merkt sich, welche URL zuletzt geladen wurde, um doppelte/unnoetige fetch-Aufrufe zu vermeiden.
 let loadedOverlayUrl = null;
 
+// Farbe, falls ein Feature in seinen GeoJSON-Properties keine eigene "color" angibt.
+// Beispiel fuer eine individuelle Farbe pro Flaeche in der GeoJSON-Datei:
+//   "properties": { "name": "SAN VII", "color": "#2a9d8f" }
+const DEFAULT_OVERLAY_COLOR = '#e63946';
+
+// Ab dieser Zoomstufe werden die Overlay-Labels eingeblendet.
+// Achtung Leaflet-Konvention: 0 = ganz herausgezoomt (Weltkarte), hoehere Werte = naeher dran
+// (typisch bis ca. 18-20 = Strassenebene). Bei 4 sind die Labels also fast immer sichtbar
+// und blenden nur bei sehr starkem Herauszoomen aus.
+const OVERLAY_LABEL_MIN_ZOOM = 4;
+
+// Alle Layer, die ein permanentes Tooltip-Label tragen - damit wir deren Sichtbarkeit
+// beim Zoomen gemeinsam ein-/ausblenden koennen.
+let overlayLabelLayers = [];
+
 function loadOverlay(url) {
   if (!url || url === loadedOverlayUrl) { return; }
   loadedOverlayUrl = url;
@@ -48,6 +63,7 @@ function loadOverlay(url) {
         // ohne die ganze Karte (inkl. Zoom) neu aufzubauen.
         if (overlayLayer) { amap.removeLayer(overlayLayer); overlayLayer = null; }
         addOverlay(amap);
+        applyOverlayLabelVisibility(amap);
       }
     })
     .catch((e) => {
@@ -58,24 +74,22 @@ function loadOverlay(url) {
 }
 
 function addOverlay(map) {
+  overlayLabelLayers = [];
   if (!overlayData) { return; }
   overlayLayer = L.geoJSON(overlayData, {
-    style: () => ({
-      color: '#e63946',
-      weight: 2,
-      fillColor: '#e63946',
-      fillOpacity: 0.2,
-    }),
-    pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
-      radius: 6,
-      color: '#e63946',
-      fillColor: '#e63946',
-      fillOpacity: 0.8,
-    }),
+    style: (feature) => {
+      const color = (feature.properties && feature.properties.color) || DEFAULT_OVERLAY_COLOR;
+      return { color, weight: 2, fillColor: color, fillOpacity: 0.2 };
+    },
+    pointToLayer: (feature, latlng) => {
+      const color = (feature.properties && feature.properties.color) || DEFAULT_OVERLAY_COLOR;
+      return L.circleMarker(latlng, { radius: 6, color, fillColor: color, fillOpacity: 0.8 });
+    },
     onEachFeature: (feature, layer) => {
       const label = feature.properties && (feature.properties.name || feature.properties.description);
       if (!label) { return; }
       const isPoint = feature.geometry && feature.geometry.type === 'Point';
+      const color = (feature.properties && feature.properties.color) || DEFAULT_OVERLAY_COLOR;
       // "permanent: true" sorgt dafuer, dass die Beschriftung staendig sichtbar ist
       // (kein Klick/Hover noetig) statt nur als Popup.
       layer.bindTooltip(DOMPurify.sanitize(String(label)), {
@@ -83,8 +97,23 @@ function addOverlay(map) {
         direction: isPoint ? 'right' : 'center',
         className: 'overlay-label',
       });
+      // Farbe des Labels an die Flaechenfarbe angleichen.
+      layer.on('tooltipopen', (e) => {
+        const el = e.tooltip.getElement();
+        if (el) { el.style.borderColor = color; el.style.color = color; }
+      });
+      overlayLabelLayers.push(layer);
     },
   }).addTo(map);
+}
+
+// Blendet die permanenten Overlay-Labels je nach aktueller Zoomstufe ein/aus.
+function applyOverlayLabelVisibility(map) {
+  if (!map) { return; }
+  const show = map.getZoom() >= OVERLAY_LABEL_MIN_ZOOM;
+  overlayLabelLayers.forEach((layer) => {
+    if (show) { layer.openTooltip(); } else { layer.closeTooltip(); }
+  });
 }
 
 
@@ -311,6 +340,8 @@ function updateMap(data) {
   // Falls die Overlay-URL/Daten noch nicht geladen sind (z.B. beim allerersten Aufbau,
   // bevor grist.onOptions gefeuert hat), jetzt anstossen.
   loadOverlay(overlayUrl);
+  // Overlay-Labels je nach Zoomstufe ein-/ausblenden.
+  map.on('zoomend', () => applyOverlayLabelVisibility(map));
 
   const points = []; //L.LatLng[], used for zooming to bounds of all markers
 
@@ -375,6 +406,8 @@ function updateMap(data) {
   } catch (err) {
     console.warn('cannot fit bounds');
   }
+  // Sichtbarkeit der Overlay-Labels passend zur (soeben gesetzten) Zoomstufe anwenden.
+  applyOverlayLabelVisibility(map);
   function makeSureSelectedMarkerIsShown() {
     const rowId = selectedRowId;
 
