@@ -33,7 +33,7 @@ let lastRecords;
 let overlayData = null;
 let overlayLayer = null;
 
-fetch('overlay.geojson')
+fetch('https://col4711.github.io/grist-map-overlay/overlay.geojson')
   .then((r) => { if (!r.ok) throw new Error('overlay.geojson not found'); return r.json(); })
   .then((geojson) => {
     overlayData = geojson;
