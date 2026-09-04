@@ -98,11 +98,19 @@ function addOverlay(map) {
     },
     pointToLayer: (feature, latlng) => {
       const color = overlayColorFor(feature);
+      const isLabelOnly = feature.properties && feature.properties.labelOnly;
+      if (isLabelOnly) {
+        // Reiner Text-Punkt (z.B. manuell platziertes Flaechen-Label aus dem BayernAtlas,
+        // <IconStyle><scale>0</scale> im KML) - keinen sichtbaren Marker zeichnen,
+        // nur die Beschriftung an dieser exakten Position.
+        return L.circleMarker(latlng, { radius: 0, opacity: 0, fillOpacity: 0, interactive: false });
+      }
       return L.circleMarker(latlng, { radius: 6, color, fillColor: color, fillOpacity: 0.8 });
     },
     onEachFeature: (feature, layer) => {
       const label = feature.properties && (feature.properties.name || feature.properties.description);
       const isPoint = feature.geometry && feature.geometry.type === 'Point';
+      const isLabelOnly = feature.properties && feature.properties.labelOnly;
       // Fuer Flaechen (Polygon/Linie): Leaflets eingebautes getCenter() liefert den
       // geometrischen Flaechenschwerpunkt, der bei verwinkelten/konkaven Formen oft
       // ausserhalb der sichtbaren Flaeche landet. Wir ersetzen ihn hier durch den
@@ -114,10 +122,11 @@ function addOverlay(map) {
       if (!label) { return; }
       const color = overlayColorFor(feature);
       // "permanent: true" sorgt dafuer, dass die Beschriftung staendig sichtbar ist
-      // (kein Klick/Hover noetig) statt nur als Popup.
+      // (kein Klick/Hover noetig) statt nur als Popup. Reine Text-Punkte (labelOnly)
+      // werden exakt auf ihrer manuell gewaehlten Position zentriert statt daneben versetzt.
       layer.bindTooltip(DOMPurify.sanitize(String(label)), {
         permanent: true,
-        direction: isPoint ? 'right' : 'center',
+        direction: (isPoint && !isLabelOnly) ? 'right' : 'center',
         className: 'overlay-label',
       });
       // Farbe des Labels an die Flaechenfarbe angleichen.

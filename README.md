@@ -91,6 +91,10 @@ Standard-`FeatureCollection` mit beliebig vielen Features:
 
 - **Label-Text**: `properties.name`, ersatzweise `properties.description`. Ist beides leer/nicht
   vorhanden, wird kein Label angezeigt (nur die Fläche/der Punkt selbst).
+- **Reiner Text-Punkt ohne Marker**: `properties.labelOnly: true` an einem Point-Feature
+  unterdrückt den farbigen Marker-Punkt – es wird nur die Beschriftung exakt an dieser
+  Position gezeigt (zentriert statt seitlich versetzt). Wird vom Konvertierungsskript
+  automatisch für BayernAtlas-Text-Placemarks gesetzt.
 - **Farbe pro Feature**: optionale `properties.color` (z. B. `"#2a9d8f"`). Fehlt sie, greift die
   Namens-Zuordnung `OVERLAY_COLORS_BY_NAME` in `page.js` (siehe unten), sonst Standard-Rot.
 - Exportquellen wie der **BayernAtlas** liefern i. d. R. kein `color`-Feld – dafür ist die
@@ -99,8 +103,40 @@ Standard-`FeatureCollection` mit beliebig vielen Features:
 
 ### Zeichnung aktualisieren
 
-Einfach die Datei, auf die die Overlay-URL zeigt, ersetzen (neuer Export aus dem BayernAtlas
-o. ä. hochladen/committen). Kein Codeänderung nötig.
+**Empfohlener Weg: KML statt GeoJSON exportieren**
+
+Der GeoJSON-Export des BayernAtlas enthält keine Farbinformationen, der KML-Export dagegen
+schon (als separate Style-Elemente). Das mitgelieferte Skript `kml_to_overlay.py` wandelt
+einen BayernAtlas-KML-Export automatisch in die passende `overlay.geojson` um – inklusive
+Name und Farbe je Fläche, ganz ohne manuelles Nachbearbeiten:
+
+```bash
+python3 kml_to_overlay.py bayernatlas_export.kml overlay.geojson
+```
+
+Hintergrund: Der BayernAtlas legt Beschriftungen häufig als **eigenständige Text-Punkte**
+ab (separates Placemark, manuell frei positioniert), statt als Property an der Fläche
+selbst – praktisch, um das Problem der automatischen Label-Zentrierung bei unregelmäßig
+geformten Flächen zu umgehen. Das Skript verändert diese Struktur nicht: **Jedes
+Placemark wird 1:1 übernommen**, mit seinen eigenen Koordinaten, seinem eigenen Namen
+(falls vergeben) und seiner eigenen Farbe – es findet keine Verknüpfung zwischen
+unterschiedlichen Placemarks statt. Text-Placemarks (im KML per `<IconStyle><scale>0</scale>`
+erkennbar) werden als Punkt-Feature mit `"labelOnly": true` markiert; das Widget zeigt für
+solche Punkte nur die Beschriftung an ihrer exakten Position, ohne farbigen Marker-Punkt.
+
+Möchtest du stattdessen, dass eine Fläche selbst beschriftet wird, vergib beim Zeichnen im
+BayernAtlas direkt einen Namen/eine Beschreibung für das Polygon – dann übernimmt das Skript
+diesen Namen automatisch in die `overlay.geojson`.
+
+Das Skript benötigt nur die Python-Standardbibliothek (kein `pip install` nötig) und
+funktioniert unabhängig von diesem Widget auch für andere KML-Zeichnungen mit demselben
+Aufbau (Style pro Placemark + separate Text-Placemarks für Namen).
+
+**GPX wird bewusst nicht unterstützt** – GPX kennt keine Flächen/Polygone und transportiert
+keine Farbinformationen, ist für dieses Widget also ungeeignet.
+
+**Alternativ (ohne Skript)**: Die Datei, auf die die Overlay-URL zeigt, direkt durch eine
+neue (bereits passend aufbereitete) GeoJSON-Datei ersetzen.
 
 ## Anpassbare Konstanten in `page.js`
 
